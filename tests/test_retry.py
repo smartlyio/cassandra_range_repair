@@ -36,34 +36,34 @@ def build_fake_retryer(nfails, maxtries, maxsleep=10):
 class RetryTests(unittest.TestCase):
     def test_first_execution_success(self):
         retryer, sleeps = build_fake_retryer(0, 5)
-        self.assertEquals(retryer(), True)
-        self.assertEquals(sleeps, [])
+        self.assertEqual(retryer(), True)
+        self.assertEqual(sleeps, [])
 
     def test_seconds_execution_success(self):
         retryer, sleeps = build_fake_retryer(1, 5)
-        self.assertEquals(retryer(), True)
-        self.assertEquals(sleeps, [1])
+        self.assertEqual(retryer(), True)
+        self.assertEqual(sleeps, [1])
 
     def test_third_execution_success(self):
         retryer, sleeps = build_fake_retryer(2, 5)
-        self.assertEquals(retryer(), True)
-        self.assertEquals(sleeps, [1, 2])
+        self.assertEqual(retryer(), True)
+        self.assertEqual(sleeps, [1, 2])
 
     def test_too_many_retries(self):
         retryer, sleeps = build_fake_retryer(10, 5)
-        self.assertEquals(retryer(), False)
-        self.assertEquals(sleeps, [1, 2, 4, 8])
+        self.assertEqual(retryer(), False)
+        self.assertEqual(sleeps, [1, 2, 4, 8])
 
     def test_max_sleep(self):
         retryer, sleeps = build_fake_retryer(10, 7)
-        self.assertEquals(retryer(), False)
-        self.assertEquals(sleeps, [1, 2, 4, 8, 10, 10])
+        self.assertEqual(retryer(), False)
+        self.assertEqual(sleeps, [1, 2, 4, 8, 10, 10])
 
     def test_disabling_max_sleep(self):
         retryer, sleeps = build_fake_retryer(10, 7, 0)
-        self.assertEquals(retryer(), False)
-        self.assertEquals(sleeps, [1, 2, 4, 8, 16, 32])
+        self.assertEqual(retryer(), False)
+        self.assertEqual(sleeps, [1, 2, 4, 8, 16, 32])
 
         retryer, sleeps = build_fake_retryer(10, 7, -1)
-        self.assertEquals(retryer(), False)
-        self.assertEquals(sleeps, [1, 2, 4, 8, 16, 32])
+        self.assertEqual(retryer(), False)
+        self.assertEqual(sleeps, [1, 2, 4, 8, 16, 32])

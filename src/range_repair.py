@@ -6,6 +6,8 @@ See the tests subdirectory for example code.
 
 Source: https://github.com/BrianGallew/cassandra_range_repair
 """
+from __future__ import print_function
+
 from optparse import OptionParser, OptionGroup
 
 import logging
@@ -17,7 +19,9 @@ import platform
 import re
 import collections
 import time
+import six
 
+longish = six.integer_types[-1]
 
 ExponentialBackoffRetryerConfig = collections.namedtuple(
     'ExponentialBackoffRetryerConfig', (
@@ -30,6 +34,7 @@ ExponentialBackoffRetryerConfig = collections.namedtuple(
 
 
 class ExponentialBackoffRetryer:
+
     def __init__(self, config, success_checker, executor, sleeper=lambda x: time.sleep(x)):
         """Constructur.
 
@@ -61,12 +66,13 @@ class ExponentialBackoffRetryer:
                                  else min(next_sleep, self.config.max_sleep))
                     next_sleep *= self.config.sleep_factor
                 else:
-                    logging.warn("Giving up execution. Failed too many times.")
+                    logging.warning("Giving up execution. Failed too many times.")
 
         return result
 
 
 class TokenContainer:
+    'Place to keep tokens'
     RANGE_MIN = -(2**63)
     RANGE_MAX = (2**63)-1
     FORMAT_TEMPLATE = "{0:+021d}"
@@ -151,7 +157,7 @@ class TokenContainer:
             if self.options.datacenter and not segments[0] in self.local_nodes:
                 logging.debug("Discarding node/token %s/%s", segments[0], segments[-1])
                 continue
-            self.ring_tokens.append(long(segments[-1]))
+            self.ring_tokens.append(longish(segments[-1]))
             logging.debug(str(self.ring_tokens))
         self.ring_tokens.sort()
         logging.info("Found {0} tokens".format(len(self.ring_tokens)))
@@ -171,12 +177,11 @@ class TokenContainer:
         for line in stdout.split("\n"):
             if not line.startswith("Token"): continue
             parts = line.split()
-            self.host_tokens.append(long(parts[-1]))
+            self.host_tokens.append(longish(parts[-1]))
         self.host_tokens.sort()
         self.host_token_count = len(self.host_tokens)
         logging.debug("%d host tokens found", self.host_token_count)
         return
-
 
     def format(self, value):
         '''Return the correctly zero-padded string for the token.
@@ -209,7 +214,7 @@ class TokenContainer:
         # This first case works for all but the highest-valued token.
         if stop > start:
             if start+steps < stop+1:
-                step_increment = ((stop - start) / steps)
+                step_increment = ((stop - start) // steps)
                 # We would have an extra, tiny step in the event the range
                 # is not evenly divisible by the number of steps.  This may
                 # give us one larger step at the end.
@@ -220,7 +225,7 @@ class TokenContainer:
         else:                     # This is the wrap-around case
             distance = (self.RANGE_MAX - start) + (stop - self.RANGE_MIN)
             if distance > steps-1:
-                step_increment = distance / steps
+                step_increment = distance // steps
                 # Can't use xrange here because the numbers are too large!
                 step_list = [self.format(x) for x in range(start, self.RANGE_MAX, step_increment)]
                 step_list.extend([self.format(x) for x in range(self.RANGE_MIN, stop, step_increment)])
@@ -243,7 +248,8 @@ def run_command(*command):
     """
     cmd = " ".join(map(str, command))
     logging.debug("run_command: " + cmd)
-    proc = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    proc = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, universal_newlines=True)
     stdout, stderr = proc.communicate()
     return proc.returncode == 0, cmd, stdout, stderr
 
@@ -283,7 +289,7 @@ def repair_range(options, start, end, step, nodeposition):
         retryer = ExponentialBackoffRetryer(retry_options, lambda x: x[0], run_command)
         success, cmd, _, stderr = retryer(*cmd)
     else:
-        print "{step:04d}/{nodeposition}".format(nodeposition=nodeposition, step=step), " ".join([str(x) for x in cmd])
+        print("{step:04d}/{nodeposition}".format(nodeposition=nodeposition, step=step), " ".join([str(x) for x in cmd]))
         success = True
 
     if not success:

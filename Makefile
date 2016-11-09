@@ -35,6 +35,7 @@ build: clean
 
 test:
 	python setup.py test
+	python3 setup.py test
 	rm -f logfile.count
 
 release: clean

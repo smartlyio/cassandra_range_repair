@@ -69,7 +69,8 @@ DEBUG      2014-05-09 17:33:54,904    repair_keyspace                 182 : SUCC
 ```
 
 ### Dependencies
--   Python 2.6
+-   Python 2.7+
+-   six
 -   Cassandra ```nodetool``` must exist in the ```PATH```
 
 ## How To Test/Contribute

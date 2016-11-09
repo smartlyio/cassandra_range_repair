@@ -15,7 +15,7 @@ class execution_count_tests(unittest.TestCase):
         results = open('logfile.count').readlines()
         # So 40 is the magic number because:
         # 10 tokens * 4 steps
-        self.assertEquals(len(results), 40)
+        self.assertEqual(len(results), 40)
         return
 
     test_ten_commands.slow=1

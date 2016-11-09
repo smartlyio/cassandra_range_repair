@@ -66,7 +66,7 @@ class ExponentialBackoffRetryer:
                                  else min(next_sleep, self.config.max_sleep))
                     next_sleep *= self.config.sleep_factor
                 else:
-                    logging.warn("Giving up execution. Failed too many times.")
+                    logging.warning("Giving up execution. Failed too many times.")
 
         return result
 

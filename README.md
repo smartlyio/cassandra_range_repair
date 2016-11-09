@@ -1,4 +1,4 @@
-range_repair.py
+range_repair.py [![build](https://travis-ci.org/BrianGallew/cassandra_range_repair.svg?branch=master)](https://travis-ci.org/BrianGallew/cassandra)
 ======================
 
 A Python script to repair the primary range of a Cassandra node in N discrete steps [using best practices](http://www.datastax.com/dev/blog/advanced-repair-techniques).

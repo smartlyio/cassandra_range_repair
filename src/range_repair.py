@@ -262,6 +262,20 @@ def repair_range(options, start, end, step, nodeposition):
     :param nodeposition: string to indicate which node this particular step is for.
     :returns: None
     """
+    if options.exclude_step:
+        (exclude_node, exclude_step) = options.exclude_step.split(',')
+        exclude_step = int(exclude_step)
+        current_node = nodeposition.split('/')[0]
+        if exclude_node == current_node and exclude_step == step:
+            logging.debug(
+                "{nodeposition} step {step:04d} skipping range ({start}, {end}) for keyspace {keyspace}".format(
+                    step=step,
+                    start=start,
+                    end=end,
+                    nodeposition=nodeposition,
+                    keyspace=options.keyspace or "<all>"))
+            return
+
     logging.debug(
         "{nodeposition} step {step:04d} repairing range ({start}, {end}) for keyspace {keyspace}".format(
             step=step,
@@ -435,6 +449,8 @@ def main():
 
     parser.add_option("--logfile", dest="logfile", metavar="FILENAME",
                       help="Send log messages to a file")
+
+    parser.add_option("--exclude-step", dest="exclude_step", help="Exclude a node,step in repairs")
 
     expBackoffGroup = OptionGroup(parser, "Exponential backoff options",
                                   "Every failed `nodetool repair` call can be retried using exponential backoff."

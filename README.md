@@ -51,8 +51,8 @@ Options:
   --dry-run             Do not execute repairs.
   --syslog=FACILITY     Send log messages to the syslog
   --logfile=FILENAME    Send log messages to a file
-  --exclude_step=node,step
-                        Exclude a specific step in the repair process
+  --exclude_step=[keyspace,[column_family,]],node,step
+                        Exclude a specific step in the repair process, keyspace and column_family are optional
 ```
 
 ### Sample

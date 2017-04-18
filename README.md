@@ -51,8 +51,10 @@ Options:
   --dry-run             Do not execute repairs.
   --syslog=FACILITY     Send log messages to the syslog
   --logfile=FILENAME    Send log messages to a file
-  --exclude_step=[keyspace,[column_family,]],node,step
+  --exclude-step=[keyspace,[column_family,]],node,step
                         Exclude a specific step in the repair process, keyspace and column_family are optional
+  --output-status=FILENAME
+                        Write current repair run status to a file as JSON.
 ```
 
 ### Sample
@@ -97,3 +99,4 @@ make debian
 - Support for multiprocessing performed by [Brian Gallew](https://github.com/BrianGallew) with credit to [M. Jaszczyk](https://github.com/mjaszczyk)
 - Multiple datacenter support by [Brian Gallew](https://github.com/BrianGallew)
 - Support debian packaging [Venkatesh Kaushik] (https://github.com/higgsmass)
+- Exclude step & output status [David Mertl] (https://github.com/dmertl)

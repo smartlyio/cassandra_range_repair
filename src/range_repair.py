@@ -309,7 +309,7 @@ class RepairStatus(object):
         :param column_families: Column families being repaired.
         """
         self.failed_repairs.append(
-            self._build_repair_dict(start, step, end, nodeposition, keyspace, column_families)
+            self._build_repair_dict(step, start, end, nodeposition, keyspace, column_families)
         )
         self.failed_count += 1
         self.write()

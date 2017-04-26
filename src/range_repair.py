@@ -283,10 +283,11 @@ class RepairStatus(object):
         self.failed_count = 0
         self.successful_count = 0
 
-    def repair_start(self, step, start, end, nodeposition, keyspace=None, column_families=None):
+    def repair_start(self, cmd, step, start, end, nodeposition, keyspace=None, column_families=None):
         """
         Record when a repair step starts.
 
+        :param cmd: Repair command.
         :param step: Step number.
         :param start: Start range.
         :param end: End range.
@@ -294,13 +295,14 @@ class RepairStatus(object):
         :param keyspace: Keyspace being repaired.
         :param column_families: Column families being repaired.
         """
-        self.current_repair = self._build_repair_dict(step, start, end, nodeposition, keyspace, column_families)
+        self.current_repair = self._build_repair_dict(cmd, step, start, end, nodeposition, keyspace, column_families)
         self.write()
 
-    def repair_fail(self, step, start, end, nodeposition, keyspace=None, column_families=None):
+    def repair_fail(self, cmd, step, start, end, nodeposition, keyspace=None, column_families=None):
         """
         Record when a repair step fails.
 
+        :param cmd: Repair command.
         :param step: Step number.
         :param start: Start range.
         :param end: End range.
@@ -309,15 +311,16 @@ class RepairStatus(object):
         :param column_families: Column families being repaired.
         """
         self.failed_repairs.append(
-            self._build_repair_dict(step, start, end, nodeposition, keyspace, column_families)
+            self._build_repair_dict(cmd, step, start, end, nodeposition, keyspace, column_families)
         )
         self.failed_count += 1
         self.write()
 
-    def repair_success(self, step, start, end, nodeposition, keyspace=None, column_families=None):
+    def repair_success(self, cmd, step, start, end, nodeposition, keyspace=None, column_families=None):
         """
         Record when a repair step succeeds.
 
+        :param cmd: Repair command.
         :param step: Step number.
         :param start: Start range.
         :param end: End range.
@@ -355,10 +358,11 @@ class RepairStatus(object):
             file.close()
 
     @staticmethod
-    def _build_repair_dict(step, start, end, nodeposition, keyspace=None, column_families=None):
+    def _build_repair_dict(cmd, step, start, end, nodeposition, keyspace=None, column_families=None):
         """
         Build a standard repair step dict.
 
+        :param cmd: Repair command.
         :param step: Step number.
         :param start: Start range.
         :param end: End range.
@@ -377,6 +381,7 @@ class RepairStatus(object):
             'nodeposition': nodeposition,
             'keyspace': keyspace or '<all>',
             'column_families': column_families or '<all>',
+            'cmd': ' '.join(map(str, cmd))
         }
 
 
@@ -465,8 +470,6 @@ def _repair_range(options, start, end, step, nodeposition, keyspace=None, column
             end=end,
             nodeposition=nodeposition,
             keyspace=keyspace or "<all>"))
-    if repair_status:
-        repair_status.repair_start(step, start, end, nodeposition, keyspace, column_families)
 
     cmd = [options.nodetool, "-h", options.host, "-p", options.port, "repair"]
     if keyspace: cmd.append(keyspace)
@@ -481,6 +484,9 @@ def _repair_range(options, start, end, step, nodeposition, keyspace=None, column
     cmd.extend([options.par, options.inc, options.snapshot,
                  "-st", start, "-et", end])
 
+    if repair_status:
+        repair_status.repair_start(cmd, step, start, end, nodeposition, keyspace, column_families)
+
     if not options.dry_run:
         retry_options = ExponentialBackoffRetryerConfig(options.max_tries, options.initial_sleep,
             options.sleep_factor, options.max_sleep)
@@ -488,12 +494,12 @@ def _repair_range(options, start, end, step, nodeposition, keyspace=None, column
         success, cmd, _, stderr = retryer(*cmd)
     else:
         if repair_status:
-            repair_status.repair_success(step, start, end, nodeposition, keyspace, column_families)
+            repair_status.repair_success(cmd, step, start, end, nodeposition, keyspace, column_families)
         print("{step:04d}/{nodeposition}".format(nodeposition=nodeposition, step=step), " ".join([str(x) for x in cmd]))
         success = True
     if not success:
         if repair_status:
-            repair_status.repair_fail(step, start, end, nodeposition, keyspace, column_families)
+            repair_status.repair_fail(cmd, step, start, end, nodeposition, keyspace, column_families)
         logging.error("FAILED: {nodeposition} step {step:04d} {cmd}".format(nodeposition=nodeposition, step=step, cmd=cmd))
         logging.error(stderr)
         return

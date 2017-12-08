@@ -4,3 +4,4 @@ logfile.count
 /.eggs
 /build
 /cassandra_range_repair.egg-info
+/.idea

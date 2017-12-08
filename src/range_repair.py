@@ -20,6 +20,9 @@ import re
 import collections
 import time
 import six
+from datetime import datetime
+import json
+from multiprocessing.managers import BaseManager
 
 longish = six.integer_types[-1]
 
@@ -241,6 +244,152 @@ class TokenContainer:
             yield step_list[0], step_list[1], step
             step_list.pop(0)
 
+
+class RepairStatus(object):
+    """
+    Record repair status and write to a file.
+    """
+
+    def __init__(self):
+        self.filename = None
+        self.started = None
+        self.updated = None
+        self.finished = None
+        self.failed_repairs = []
+        self.current_repair = {}
+        self.successful_count = 0
+        self.failed_count = 0
+
+    def start(self, options):
+        """
+        Start recording repair status.
+
+        :param options: Range repair options.
+        """
+        self.filename = options.output_status
+        self.reset()
+        self.started = datetime.now().isoformat()
+        self.write()
+
+    def reset(self):
+        """
+        Reset all repair status values.
+        """
+        self.started = None
+        self.updated = None
+        self.finished = None
+        self.failed_repairs = []
+        self.current_repair = {}
+        self.failed_count = 0
+        self.successful_count = 0
+
+    def repair_start(self, cmd, step, start, end, nodeposition, keyspace=None, column_families=None):
+        """
+        Record when a repair step starts.
+
+        :param cmd: Repair command.
+        :param step: Step number.
+        :param start: Start range.
+        :param end: End range.
+        :param nodeposition: Node position.
+        :param keyspace: Keyspace being repaired.
+        :param column_families: Column families being repaired.
+        """
+        self.current_repair = self._build_repair_dict(cmd, step, start, end, nodeposition, keyspace, column_families)
+        self.write()
+
+    def repair_fail(self, cmd, step, start, end, nodeposition, keyspace=None, column_families=None):
+        """
+        Record when a repair step fails.
+
+        :param cmd: Repair command.
+        :param step: Step number.
+        :param start: Start range.
+        :param end: End range.
+        :param nodeposition: Node position.
+        :param keyspace: Keyspace being repaired.
+        :param column_families: Column families being repaired.
+        """
+        self.failed_repairs.append(
+            self._build_repair_dict(cmd, step, start, end, nodeposition, keyspace, column_families)
+        )
+        self.failed_count += 1
+        self.write()
+
+    def repair_success(self, cmd, step, start, end, nodeposition, keyspace=None, column_families=None):
+        """
+        Record when a repair step succeeds.
+
+        :param cmd: Repair command.
+        :param step: Step number.
+        :param start: Start range.
+        :param end: End range.
+        :param nodeposition: Node position.
+        :param keyspace: Keyspace being repaired.
+        :param column_families: Column families being repaired.
+        """
+        self.successful_count += 1
+        self.write()
+
+    def finish(self):
+        """
+        Set repair session as finished.
+        """
+        self.finished = datetime.now().isoformat()
+        self.write()
+
+    def write(self):
+        """
+        Write repair status to file, if requested.
+        """
+        # No filename indicates output status was not requested
+        if self.filename:
+            self.updated = datetime.now().isoformat()
+            file = open(self.filename, 'w')
+            file.write(json.dumps({
+                'started': self.started,
+                'updated': self.updated,
+                'finished': self.finished,
+                'failed_repairs': self.failed_repairs,
+                'current_repair': self.current_repair,
+                'successful_count': self.successful_count,
+                'failed_count': self.failed_count,
+            }))
+            file.close()
+
+    @staticmethod
+    def _build_repair_dict(cmd, step, start, end, nodeposition, keyspace=None, column_families=None):
+        """
+        Build a standard repair step dict.
+
+        :param cmd: Repair command.
+        :param step: Step number.
+        :param start: Start range.
+        :param end: End range.
+        :param nodeposition: Node position.
+        :param keyspace: Keyspace being repaired.
+        :param column_families: Column families being repaired.
+
+        :rtype: dict
+        :return: Dict of repair step info.
+        """
+        return {
+            'time': datetime.now().isoformat(),
+            'step': step,
+            'start': start,
+            'end': end,
+            'nodeposition': nodeposition,
+            'keyspace': keyspace or '<all>',
+            'column_families': column_families or '<all>',
+            'cmd': ' '.join(map(str, cmd))
+        }
+
+
+class TestManager(BaseManager):
+    pass
+TestManager.register('RepairStatus', RepairStatus)
+
+
 def run_command(*command):
     """Execute a shell command and return the output
     :param command: the command to be run and all of the arguments
@@ -253,13 +402,65 @@ def run_command(*command):
     stdout, stderr = proc.communicate()
     return proc.returncode == 0, cmd, stdout, stderr
 
-def repair_range(options, start, end, step, nodeposition):
+def repair_range(options, start, end, step, nodeposition, repair_status=None):
     """Repair a keyspace/columnfamily between a given token range with nodetool
     :param options: OptionParser result
     :param start: Beginning token in the range to repair (formatted string)
     :param end: Ending token in the range to repair (formatted string)
     :param step: The step we're executing (for logging purposes)
     :param nodeposition: string to indicate which node this particular step is for.
+    :param RepairStatus repair_status: Repair status.
+    :returns: None
+    """
+    if options.exclude_step:
+        excluded = is_excluded(options, start, end, step, nodeposition)
+        if excluded == 1:
+            logging.debug(
+                "{nodeposition} step {step:04d} skipping range ({start}, {end}) for keyspace {keyspace}".format(
+                    step=step,
+                    start=start,
+                    end=end,
+                    nodeposition=nodeposition,
+                    keyspace=options.keyspace or "<all>"))
+            return
+        elif excluded == 2:
+            logging.info(
+                'Running individual repair commands for each keyspace to exclude {0} {1}'.format(
+                    options.exclude_step['keyspace'],
+                    options.exclude_step['column_family'] or ''))
+            for keyspace, column_families in enumerate_keyspaces(options).iteritems():
+                if keyspace == options.exclude_step['keyspace']:
+                    if options.exclude_step['column_family']:
+                        logging.info('Repairing all column families except {0} for keyspace {1}'.format(
+                            options.exclude_step['column_family'],
+                            keyspace))
+                        cf_to_repair = [cf for cf in column_families if cf != options.exclude_step['column_family']]
+                        _repair_range(options, start, end, step, nodeposition, keyspace, cf_to_repair, repair_status)
+                        continue
+                    else:
+                        logging.debug(
+                            "{nodeposition} step {step:04d} skipping range ({start}, {end}) for keyspace {keyspace}".format(
+                                step=step,
+                                start=start,
+                                end=end,
+                                nodeposition=nodeposition,
+                                keyspace=keyspace))
+                        continue
+                _repair_range(options, start, end, step, nodeposition, keyspace, options.columnfamily, repair_status)
+            return
+    # Normal repair_range
+    _repair_range(options, start, end, step, nodeposition, options.keyspace, options.columnfamily, repair_status)
+
+def _repair_range(options, start, end, step, nodeposition, keyspace=None, column_families=None, repair_status=None):
+    """Repair a keyspace/columnfamily between a given token range with nodetool
+    :param options: OptionParser result
+    :param start: Beginning token in the range to repair (formatted string)
+    :param end: Ending token in the range to repair (formatted string)
+    :param step: The step we're executing (for logging purposes)
+    :param nodeposition: string to indicate which node this particular step is for.
+    :param keyspace: Keyspace to repair.
+    :param column_families: List of column families to repair.
+    :param RepairStatus repair_status: Repair status.
     :returns: None
     """
     logging.debug(
@@ -268,11 +469,11 @@ def repair_range(options, start, end, step, nodeposition):
             start=start,
             end=end,
             nodeposition=nodeposition,
-            keyspace=options.keyspace or "<all>"))
+            keyspace=keyspace or "<all>"))
 
     cmd = [options.nodetool, "-h", options.host, "-p", options.port, "repair"]
-    if options.keyspace: cmd.append(options.keyspace)
-    cmd.extend(options.columnfamily)
+    if keyspace: cmd.append(keyspace)
+    cmd.extend(column_families or options.columnfamily)
 
     # -local flag cannot be used in conjunction with -pr
     if options.local:
@@ -283,16 +484,22 @@ def repair_range(options, start, end, step, nodeposition):
     cmd.extend([options.par, options.inc, options.snapshot,
                  "-st", start, "-et", end])
 
+    if repair_status:
+        repair_status.repair_start(cmd, step, start, end, nodeposition, keyspace, column_families)
+
     if not options.dry_run:
         retry_options = ExponentialBackoffRetryerConfig(options.max_tries, options.initial_sleep,
             options.sleep_factor, options.max_sleep)
         retryer = ExponentialBackoffRetryer(retry_options, lambda x: x[0], run_command)
         success, cmd, _, stderr = retryer(*cmd)
     else:
+        if repair_status:
+            repair_status.repair_success(cmd, step, start, end, nodeposition, keyspace, column_families)
         print("{step:04d}/{nodeposition}".format(nodeposition=nodeposition, step=step), " ".join([str(x) for x in cmd]))
         success = True
-
     if not success:
+        if repair_status:
+            repair_status.repair_fail(cmd, step, start, end, nodeposition, keyspace, column_families)
         logging.error("FAILED: {nodeposition} step {step:04d} {cmd}".format(nodeposition=nodeposition, step=step, cmd=cmd))
         logging.error(stderr)
         return
@@ -338,6 +545,10 @@ def repair(options):
     tokens = TokenContainer(options)
 
     worker_pool = multiprocessing.Pool(options.workers)
+    manager = TestManager()
+    manager.start()
+    repair_status = manager.RepairStatus()
+    repair_status.start(options)
 
     for token_num, host_token in enumerate(tokens.host_tokens):
         range_termination = host_token
@@ -364,11 +575,95 @@ def repair(options):
                                             end,
                                             step,
                                             "{count}/{total}".format(count=token_num + 1,
-                                                                     total=tokens.host_token_count)))
+                                                                     total=tokens.host_token_count),
+                                            repair_status))
                    for start, end, step in tokens.sub_range_generator(range_start, range_termination, options.steps)]
         for r in results:
             r.get()
+    repair_status.finish()
     return
+
+# Exclude Step Feature
+
+def is_excluded(options, start, end, step, nodeposition):
+    """Test if a particular range is excluded.
+    :param options: OptionParser result
+    :param start: Beginning token in the range to repair (formatted string)
+    :param end: Ending token in the range to repair (formatted string)
+    :param step: The step we're executing (for logging purposes)
+    :param nodeposition: string to indicate which node this particular step is for.
+    :returns: 0 if not excluded, 1 if entire step is excluded, 2 if only keyspace is excluded.
+    """
+    current_node = nodeposition.split('/')[0]
+    if options.exclude_step['node'] == current_node and options.exclude_step['step'] == step:
+        if options.exclude_step['keyspace']:
+            if options.keyspace and options.keyspace == options.exclude_step['keyspace']:
+                return 1
+            elif not options.keyspace:
+                # No options.keyspace means all keyspaces, but we only want to exclude one keyspace
+                return 2
+        else:
+            return 1
+    return 0
+
+def enumerate_keyspaces(options):
+    """Get a dict of all keyspaces and their column families.
+    :param options: OptionParser result
+    :returns: Dictionary of keyspace: [column families]
+    """
+    logging.info('running nodetool cfstats')
+    cmd = [options.nodetool, "-h", options.host, "-p", options.port, "cfstats"]
+    success, _, stdout, stderr = run_command(*cmd)
+
+    if not success:
+        raise Exception("Died in enumerate_keyspaces because: " + stderr)
+
+    logging.debug('cfstats retrieved, parsing output to retrieve keyspaces')
+    # Build a dictionary of keyspace: [column families]
+    keyspaces = {}
+    keyspace = None
+    for line in stdout.split("\n"):
+        if line.startswith('Keyspace: '):
+            keyspace = line.replace('Keyspace: ', '')
+            keyspaces[keyspace] = []
+        elif line.startswith("\t\tTable: "):
+            table = line.replace("\t\tTable: ", '')
+            keyspaces[keyspace].append(table)
+    logging.info('Found {0} keyspaces'.format(len(keyspaces)))
+    # logging.debug(keyspaces)
+    return keyspaces
+
+def parse_exclude_step(option, opt_str, value, parser):
+    """Parse exclude_step arg.
+    :param option: Option instance.
+    :param opt_str: Option string.
+    :param value: Option value.
+    :param parser: Option parser.
+    :return: Exclude step value.
+    """
+    pieces = value.split(',')
+    if len(pieces) == 4:
+        exclude_step = {
+            'keyspace': pieces[0],
+            'column_family': pieces[1],
+            'node': pieces[2],
+            'step': int(pieces[3])
+        }
+    elif len(pieces) == 3:
+        exclude_step = {
+            'keyspace': pieces[0],
+            'column_family': None,
+            'node': pieces[1],
+            'step': int(pieces[2])
+        }
+    else:
+        exclude_step = {
+            'keyspace': None,
+            'column_family': None,
+            'node': pieces[0],
+            'step': int(pieces[1])
+        }
+    setattr(parser.values, option.dest, exclude_step)
 
 def main():
     """Validate arguments and initiate repair
@@ -436,6 +731,12 @@ def main():
     parser.add_option("--logfile", dest="logfile", metavar="FILENAME",
                       help="Send log messages to a file")
 
+    parser.add_option("--exclude-step", dest="exclude_step", action="callback", type="str",
+                      help="Exclude a [keyspace,[column_family,]]node,step in repairs", callback=parse_exclude_step)
+
+    parser.add_option("--output-status", dest="output_status",
+                      help="Output (and update) a status file for each run")
+
     expBackoffGroup = OptionGroup(parser, "Exponential backoff options",
                                   "Every failed `nodetool repair` call can be retried using exponential backoff."
                                   " This is useful if you have flaky connectivity between datacenters.")
@@ -479,3 +780,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

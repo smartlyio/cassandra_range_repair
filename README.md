@@ -31,19 +31,23 @@ Options:
                         Keyspace to repair (REQUIRED)
   -c COLUMNFAMILY, --columnfamily=COLUMNFAMILY
                         ColumnFamily to repair, can appear multiple times
-  -H HOST, --host=HOST  Hostname to repair [default: $HOSTNAME]
-  -P PORT, --port=Port  JMX port to use for nodetool [default: 7199]
+  -H HOST, --host=HOST  Hostname to repair [default: hostname of the machine]
+  -P PORT, --port=PORT  JMX port to use for nodetool commands [default: 7199]
+  -u USERNAME, --username=USERNAME
+                        Username to use for nodetool commands
+  -p PASSWORD, --password=PASSWORD
+                        Password to use for nodetool commands
   -s STEPS, --steps=STEPS
                         Number of discrete ranges [default: 100]
   -o OFFSET, --offset=OFFSET
-                        Number of tokens to skip [default: 0]   
+                        Start from node[,step]
   -n NODETOOL, --nodetool=NODETOOL
                         Path to nodetool [default: nodetool]
   -w WORKERS, --workers=WORKERS
                         Number of workers to use for parallelism [default: 1]
   -D DATACENTER, --datacenter=DATACENTER
+                        Identify local datacenter [default: none]
   -l, --local           Restrict repair to the local DC
-  -p, --par             Carry out a parallel repair (post-2.x only)
   -i, --inc             Carry out an incremental repair (post-2.1 only).
   -S, --snapshot        Use snapshots (pre-2.x only)
   -v, --verbose         Verbose output
@@ -51,10 +55,27 @@ Options:
   --dry-run             Do not execute repairs.
   --syslog=FACILITY     Send log messages to the syslog
   --logfile=FILENAME    Send log messages to a file
-  --exclude-step=[keyspace,[column_family,]],node,step
-                        Exclude a specific step in the repair process, keyspace and column_family are optional
-  --output-status=FILENAME
-                        Write current repair run status to a file as JSON.
+  --exclude-step=EXCLUDE_STEP
+                        Exclude a [keyspace,[column_family,]]node,step in
+                        repairs
+  --output-status=OUTPUT_STATUS
+                        Output (and update) a status file for each run
+
+  Exponential backoff options:
+    Every failed `nodetool repair` call can be retried using exponential
+    backoff. This is useful if you have flaky connectivity between
+    datacenters.
+
+    --max-tries=N       Number of times to rerun a failed `nodetool repair`
+                        call [default: 1]
+    --initial-sleep=SECONDS
+                        Number of seconds to sleep first `nodetool repair`
+                        [default: 1]
+    --sleep-factor=N    Multiplication factor that sleep time increases with
+                        for every failed `nodetool repair` call [default: 2]
+    --max-sleep=N       Maximum time in seconds the retryer is allowed to
+                        sleep. Set to zero or negative to disable. [default:
+                        1800]
 ```
 
 ### Sample

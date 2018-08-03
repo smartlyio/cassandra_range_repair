@@ -106,7 +106,7 @@ class TokenContainer:
             logging.debug("No datacenter specified, all ring members' tokens will be considered")
             return
         logging.debug("Determining local ring members")
-        cmd = [self.options.nodetool, "-h", self.options.host, "-p", self.options.port, "gossipinfo"]
+        cmd = get_command(self.options, "gossipinfo")
         success, _, stdout, stderr = run_command(*cmd)
 
         if not success:
@@ -142,7 +142,7 @@ class TokenContainer:
         :returns: None
         """
         logging.info("running nodetool ring, this will take a little bit of time")
-        cmd = [self.options.nodetool, "-h", self.options.host, "-p", self.options.port, "ring"]
+        cmd = get_command(self.options, "ring")
         success, _, stdout, stderr = run_command(*cmd)
 
         if not success:
@@ -171,7 +171,7 @@ class TokenContainer:
         """Gets the tokens ranges for the target host
         :returns: None
         """
-        cmd = [self.options.nodetool, "-h", self.options.host, "-p", self.options.port, "info", "-T"]
+        cmd = get_command(self.options, "info", "-T")
         success, _, stdout, stderr = run_command(*cmd)
         if not success or stdout.find("Token") == -1:
             logging.error(stdout)
@@ -412,7 +412,7 @@ def repair_range(options, start, end, step, nodeposition, repair_status=None):
     :param RepairStatus repair_status: Repair status.
     :returns: None
     """
-    if options.exclude_step:
+    if options.exclude_step or options.offset:
         excluded = is_excluded(options, start, end, step, nodeposition)
         if excluded == 1:
             logging.debug(
@@ -471,7 +471,7 @@ def _repair_range(options, start, end, step, nodeposition, keyspace=None, column
             nodeposition=nodeposition,
             keyspace=keyspace or "<all>"))
 
-    cmd = [options.nodetool, "-h", options.host, "-p", options.port, "repair"]
+    cmd = get_command(options, "repair")
     if keyspace: cmd.append(keyspace)
     cmd.extend(column_families or options.columnfamily)
 
@@ -481,7 +481,10 @@ def _repair_range(options, start, end, step, nodeposition, keyspace=None, column
     else:
         cmd.extend(["-pr"])
 
-    cmd.extend([options.par, options.inc, options.snapshot,
+    if not options.inc:
+        cmd.append("-full")
+
+    cmd.extend([options.snapshot,
                  "-st", start, "-et", end])
 
     if repair_status:
@@ -539,6 +542,8 @@ def repair(options):
     :param options.keyspace: Cassandra keyspace to repair
     :param options.host: (optional) Hostname to pass to nodetool
     :param options.port: (optional) JMX Port to pass to nodetool
+    :param options.username: (optional) Username to pass to nodetool
+    :param options.password: (optional) Password to pass to nodetool
     :param options.steps: Number of sub-ranges to split primary range in to
     :param options.workers: Number of workers to use
     """
@@ -554,7 +559,7 @@ def repair(options):
         range_termination = host_token
         range_start = tokens.get_preceding_token(range_termination)
 
-        if token_num < options.offset:
+        if options.offset and token_num < options.offset['node']-1:
             logging.info(
                 "[{count}/{total}] skipping token..".format(
                     count=token_num + 1,
@@ -595,7 +600,11 @@ def is_excluded(options, start, end, step, nodeposition):
     :returns: 0 if not excluded, 1 if entire step is excluded, 2 if only keyspace is excluded.
     """
     current_node = nodeposition.split('/')[0]
-    if options.exclude_step['node'] == current_node and options.exclude_step['step'] == step:
+    
+    if options.offset and options.offset['node'] == int(current_node) and step < options.offset['step']:
+        return 1
+
+    if options.exclude_step and options.exclude_step['node'] == current_node and options.exclude_step['step'] == step:
         if options.exclude_step['keyspace']:
             if options.keyspace and options.keyspace == options.exclude_step['keyspace']:
                 return 1
@@ -612,7 +621,7 @@ def enumerate_keyspaces(options):
     :returns: Dictionary of keyspace: [column families]
     """
     logging.info('running nodetool cfstats')
-    cmd = [options.nodetool, "-h", options.host, "-p", options.port, "cfstats"]
+    cmd = get_command(options, "cfstats")
     success, _, stdout, stderr = run_command(*cmd)
 
     if not success:
@@ -665,6 +674,35 @@ def parse_exclude_step(option, opt_str, value, parser):
         }
     setattr(parser.values, option.dest, exclude_step)
 
+def parse_offset(option, opt_str, value, parser):
+    """Parse offset arg.
+    :param option: Option instance.
+    :param opt_str: Option string.
+    :param value: Option value.
+    :param parser: Option parser.
+    :return: Offset step value.
+    """
+    pieces = value.split(',')
+    if len(pieces) >= 2:
+        offset = {
+            'node': int(pieces[0]),
+            'step': int(pieces[1])
+        }
+    else:
+        offset = {
+            'node': int(pieces[0]),
+            'step': 1
+        }
+    setattr(parser.values, option.dest, offset)
+
+def get_command(options, *args):
+    cmd = [options.nodetool]
+    cmd.extend(["-h", options.host, "-p", options.port])
+    if(options.username and options.password):
+        cmd.extend(["-u", options.username, "-pw", options.password])
+    cmd.extend(args)
+    return cmd
+
 def main():
     """Validate arguments and initiate repair
     """
@@ -682,11 +720,17 @@ def main():
     parser.add_option("-P", "--port", dest="port", default=7199, type="int",
                       metavar="PORT", help="JMX port to use for nodetool commands [default: %default]")
 
+    parser.add_option("-u", "--username", dest="username", default=None,
+                      metavar="USERNAME", help="Username to use for nodetool commands")
+
+    parser.add_option("-p", "--password", dest="password", default=None,
+                      metavar="PASSWORD", help="Password to use for nodetool commands")
+
     parser.add_option("-s", "--steps", dest="steps", type="int", default=100,
                       metavar="STEPS", help="Number of discrete ranges [default: %default]")
 
-    parser.add_option("-o", "--offset", dest="offset", type="int", default=0,
-                      metavar="OFFSET", help="Number of tokens to skip [default: %default]")
+    parser.add_option("-o", "--offset", dest="offset", action="callback", type="str",
+                      metavar="OFFSET", help="Start from node[,step]", callback=parse_offset)
 
     parser.add_option("-n", "--nodetool", dest="nodetool", default="nodetool",
                       metavar="NODETOOL", help="Path to nodetool [default: %default]")
@@ -704,13 +748,8 @@ def main():
                       action="store_const", const="-local",
                       metavar="LOCAL", help="Restrict repair to the local DC")
 
-    parser.add_option("-p", "--par", dest="par", default="",
-                      action="store_const", const="-par",
-                      metavar="PAR", help="Carry out a parallel repair (post-2.x only)")
-
-    parser.add_option("-i", "--inc", dest="inc", default="",
-                      action="store_const", const="-inc",
-                      metavar="INC", help="Carry out an incremental repair (post-2.1 only). Forces --par")
+    parser.add_option("-i", "--inc", dest="inc", default=False, action='store_true',
+                      metavar="INC", help="Carry out an incremental repair (post-2.1 only).")
 
     parser.add_option("-S", "--snapshot", dest="snapshot", default="",
                       action="store_const", const="-snapshot",
@@ -770,10 +809,6 @@ def main():
         parser.print_help()
         logging.debug('Extra parameters')
         sys.exit(1)
-
-    if options.inc and not options.par:
-        logging.info('Incremental repairs needs --par: enabling')
-        options.par = '-par'
 
     repair(options)
     exit(0)

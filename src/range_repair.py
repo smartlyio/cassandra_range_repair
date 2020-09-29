@@ -697,7 +697,7 @@ def parse_offset(option, opt_str, value, parser):
 
 def get_command(options, *args):
     cmd = [options.nodetool]
-    cmd.extend(["-h", options.host, "-p", options.port])
+    cmd.extend(["--ssl", "-h", options.host, "-p", options.port])
     if(options.username and options.password):
         cmd.extend(["-u", options.username, "-pw", options.password])
     cmd.extend(args)
